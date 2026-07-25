@@ -7,22 +7,26 @@
 
 ;; ---------------------- state machine steps ----------------------
 
-(defn intake-proposal [proposal]
+(defn intake-proposal
   "Intake: validate structure."
+  [proposal]
   (if (and (:operation proposal) (:effect proposal))
     {:state :intake-ok :proposal proposal}
     {:state :intake-fail :reason "Missing :operation or :effect"}))
 
-(defn advise-proposal [store proposal]
+(defn advise-proposal
   "Advise: add reasoning and confidence to the proposal."
+  [store proposal]
   (advisor/advise-proposal store proposal))
 
-(defn govern-proposal [store proposal]
+(defn govern-proposal
   "Govern: apply three HARD checks."
+  [store proposal]
   (governor/govern store proposal))
 
-(defn decide-proposal [govern-result]
+(defn decide-proposal
   "Decide: translate governor decision + special handling for escalation ops."
+  [govern-result]
   (let [op-id (:operation (:proposal govern-result))
         decision (:decision govern-result)]
     (if (not (:passes? govern-result))
@@ -34,8 +38,9 @@
         {:action :pending-approval
          :reason "Proposal passed governance, awaiting approval"}))))
 
-(defn commit-proposal [store proposal result]
+(defn commit-proposal
   "Commit: record the decision and any state changes."
+  [store proposal result]
   (store/append-ledger! store
     {:proposal proposal
      :result result

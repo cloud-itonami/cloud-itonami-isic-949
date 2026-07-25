@@ -1,0 +1,13 @@
+;; Run the civicmembershiporg actor test suite under nbb.
+;;
+;;   nbb --classpath src:test run-tests.cljs
+;;
+;; The `--classpath` is required: without it nbb cannot resolve
+;; `civicmembershiporg.test`. The suite signals failure by throwing from
+;; `assert`, so a failing run exits non-zero on its own; this script exists
+;; because there was previously NO way to invoke the suite at all -- the
+;; `:test` alias only added `:extra-paths`, and `-main` is guarded by
+;; `#?(:clj ...)`. It runs identically under `clojure -M:test`.
+(require '[civicmembershiporg.test :as t])
+
+(t/run-all-tests)

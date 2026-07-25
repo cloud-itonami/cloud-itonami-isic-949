@@ -39,7 +39,8 @@
   (let [config (get phase-config phase {})]
     (contains? (:always-escalate config) op-id)))
 
-(defn describe-phase [phase]
+(defn describe-phase
   "Human-readable phase description."
+  [phase]
   (let [config (get phase-config phase {})]
     (str "Phase " phase ": " (:name config))))
