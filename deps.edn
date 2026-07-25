@@ -1,4 +1,16 @@
 {:paths ["src" "test"]
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
         org.clojure/clojurescript {:mvn/version "1.10.914"}}
- :aliases {:test {:extra-paths ["test"]}}}
+ :aliases
+ {;; :extra-paths alone made this alias uninvocable -- nothing ran the suite,
+  ;; which is why 11 misplaced docstrings survived here. `clojure -M:test` now
+  ;; runs it; `nbb --classpath src:test run-tests.cljs` runs the same suite
+  ;; under the preferred runtime.
+  :test {:extra-paths ["test"]
+         :main-opts ["-m" "civicmembershiporg.test"]}
+  ;; clj-kondo from deps (no binary), errors fail CI. This repo had NO :lint
+  ;; alias at all, so nothing ever reported the docstrings.
+  :lint {:replace-deps {clj-kondo/clj-kondo {:mvn/version "2024.11.14"}}
+         :main-opts    ["-m" "clj-kondo.main"
+                        "--lint" "src" "test"
+                        "--fail-level" "error"]}}}

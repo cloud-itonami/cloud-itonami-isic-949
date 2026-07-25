@@ -5,8 +5,9 @@
 
 ;; ---------------------- demo scenarios ----------------------
 
-(defn scenario-1-happy-path []
+(defn scenario-1-happy-path
   "Scenario 1: Happy path — schedule member event for verified member."
+  []
   (println "\n[Scenario 1] Happy Path: Schedule Member Event")
   (let [s (store/make-store)
         result (operation/run-proposal s
@@ -18,8 +19,9 @@
     (assert (= :pending-approval (:action result)))
     (println "  ✓ PASS")))
 
-(defn scenario-2-unverified-member []
+(defn scenario-2-unverified-member
   "Scenario 2: Hard check — unverified member blocked."
+  []
   (println "\n[Scenario 2] Hard Check: Unverified Member Blocked")
   (let [s (store/make-store)
         result (operation/run-proposal s
@@ -31,8 +33,9 @@
     (assert (= :held (:action result)))
     (println "  ✓ PASS")))
 
-(defn scenario-3-religious-doctrine-blocked []
+(defn scenario-3-religious-doctrine-blocked
   "Scenario 3: Scope exclusion — religious-doctrine decision blocked."
+  []
   (println "\n[Scenario 3] Scope Exclusion: Religious-Doctrine Blocked")
   (let [s (store/make-store)
         result (operation/run-proposal s
@@ -44,8 +47,9 @@
     (assert (= :held (:action result)))
     (println "  ✓ PASS")))
 
-(defn scenario-4-political-position-blocked []
+(defn scenario-4-political-position-blocked
   "Scenario 4: Scope exclusion — political-position decision blocked."
+  []
   (println "\n[Scenario 4] Scope Exclusion: Political Position Blocked")
   (let [s (store/make-store)
         result (operation/run-proposal s
@@ -57,8 +61,9 @@
     (assert (= :held (:action result)))
     (println "  ✓ PASS")))
 
-(defn scenario-5-safety-escalation []
+(defn scenario-5-safety-escalation
   "Scenario 5: Escalation — safety/conduct concern always escalates."
+  []
   (println "\n[Scenario 5] Escalation: Safety Concern Escalates")
   (let [s (store/make-store)
         result (operation/run-proposal s
