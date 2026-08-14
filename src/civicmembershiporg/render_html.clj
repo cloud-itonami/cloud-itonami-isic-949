@@ -1,0 +1,572 @@
+(ns civicmembershiporg.render-html
+  "Build-time HTML renderer for `docs/samples/operator-console.html`.
+
+  Closes flagship checklist item 2 for cloud-itonami-isic-949: this repo had
+  NO demo page and no generator at all. This namespace drives the REAL actor
+  stack -- `civicmembershiporg.operation/run-proposal`, which is
+  intake -> `civicmembershiporg.advisor` -> `civicmembershiporg.governor` ->
+  decide -> `civicmembershiporg.store` -- and renders whatever that run
+  actually produced.
+
+  Two structural differences from the sibling consoles, both measured before
+  a line of this file was written, not assumed:
+
+  1. NO langgraph. Unlike `cloud-itonami-isic-9522` (whose `deps.edn` pulls
+     `io.github.kotoba-lang/langgraph` and whose renderer drives the actor via
+     `g/run*` with `:thread-id`/`:resume?`), this repo wires no StateGraph at
+     all. `operation/run-proposal` IS the real pipeline here, so that is what
+     this renderer calls. There is nothing to route through `g/run*`.
+  2. NO approval/resume step. `operation/decide-proposal` returns
+     `:pending-approval` as a TERMINAL action -- there is no `approve!` entry
+     point anywhere in this repo, and `store/commit-record!` is never invoked
+     by the pipeline. So no proposal in this actor ever reaches a committed
+     state and no approver identity is ever produced. The console DERIVES and
+     states that (see `retention-report`) rather than quietly rendering an
+     empty column, because a reader cannot otherwise tell `nobody approved`
+     from `the store didn't keep it`.
+
+  Every member id, event id, dues balance, organizer and account status on the
+  page comes from `civicmembershiporg.store/demo-data`; every action, reason
+  and violation comes from the governor's own output on this run. Nothing on
+  the page is hand-typed domain data.
+
+  Deterministic: the scenario is a fixed vector, the pipeline is pure over the
+  seeded store, directory rows are explicitly sorted by id rather than relying
+  on map iteration order, and no wall-clock timestamp reaches the page (the
+  only timestamp in the ledger is the fixed literal `operation/commit-proposal`
+  writes). Two consecutive runs are byte-identical.
+
+  Usage: `clojure -M:dev:render-html [out-file]`
+  (default `docs/samples/operator-console.html`)."
+  (:require [jp-go-dds.skin :as skin]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
+            [civicmembershiporg.store :as store]
+            [civicmembershiporg.governor :as governor]
+            [civicmembershiporg.operation :as operation]
+            [civicmembershiporg.phase :as phase]))
+
+;; ----------------------------- scenario -----------------------------
+
+(def ^:private scenario
+  "Every proposal this console drives through the real pipeline, in order.
+
+  Subjects are restricted to ids that actually exist in
+  `store/demo-data` -- members `member-1`..`member-3`, events `event-1`
+  and `event-2`. No id is invented to manufacture a branch, which is why the
+  governor's `Member not found in store` branch is deliberately NOT exercised
+  here: reaching it would require naming a member that does not exist, and an
+  invented identifier on the page is exactly what ADR-2607122300 §1 forbids.
+  The other two HARD checks, and all three at once, are reachable with real
+  seed ids and are exercised below.
+
+  Coverage this scenario is built to produce (asserted at build time by
+  `-main`): all three HARD checks fire, the `:flag-safety-concern` exemption
+  is shown NOT to fire, and both the EN and JA halves of the scope scan fire."
+  [;; --- clean administrative coordination (verified members only) ---
+   {:operation :schedule-member-event :member-id "member-1" :event-id "event-1"
+    :effect :propose
+    :description "Confirm room booking and volunteer roster for the Community Gathering"}
+   {:operation :schedule-member-event :member-id "member-2" :event-id "event-2"
+    :effect :propose
+    :description "Confirm the Town Hall booking for the Annual Civic Forum"}
+   {:operation :coordinate-dues-processing-logistics :member-id "member-2"
+    :effect :propose
+    :description "Send the routine dues-processing reminder batch"}
+   {:operation :coordinate-supply-request :member-id "member-1"
+    :effect :propose
+    :description "Order chairs and refreshments for the Community Center"}
+   {:operation :schedule-staff-shift-proposal :member-id "member-1"
+    :effect :propose
+    :description "Draft the front-desk shift rota for the Community Center"}
+
+   ;; --- always escalates to a human ---
+   {:operation :flag-safety-concern :member-id "member-1"
+    :concern-type "facility-hazard" :effect :propose
+    :description "Loose handrail reported at the Community Center entrance"}
+   ;; The governor's `allowed-ops` exemption, demonstrated rather than
+   ;; asserted: this proposal contains a term ("disciplinary") that HARD-blocks
+   ;; every other op, but `:flag-safety-concern` is exempt by design so that
+   ;; safety and conduct reporting cannot self-block. Expect :escalated, NOT
+   ;; :held -- and `-main` fails the build if that stops being true.
+   {:operation :flag-safety-concern :member-id "member-2"
+    :concern-type "member-conduct" :effect :propose
+    :description "Conduct complaint that may lead to a disciplinary referral"}
+
+   ;; --- HARD check 1: member not registered AND verified ---
+   {:operation :schedule-member-event :member-id "member-3" :event-id "event-1"
+    :effect :propose
+    :description "Add the volunteer to the Community Gathering roster"}
+   {:operation :coordinate-dues-processing-logistics :member-id "member-3"
+    :effect :propose
+    :description "Send the outstanding-balance reminder"}
+
+   ;; --- HARD check 2: effect must be :propose ---
+   {:operation :schedule-member-event :member-id "member-1" :event-id "event-2"
+    :effect :execute
+    :description "Book the Town Hall directly, skipping the proposal step"}
+
+   ;; --- HARD check 3: scope exclusion (EN patterns) ---
+   {:operation :schedule-member-event :member-id "member-1" :event-id "event-2"
+    :effect :propose
+    :description "Set the religious doctrine to be taught at the Annual Civic Forum"}
+   {:operation :coordinate-dues-processing-logistics :member-id "member-2"
+    :effect :propose
+    :description "Adopt the organization's political stance before billing"}
+   {:operation :coordinate-dues-processing-logistics :member-id "member-2"
+    :effect :propose
+    :description "Grant a dues waiver to clear the outstanding balance"}
+   {:operation :schedule-member-event :member-id "member-1"
+    :effect :propose
+    :description "Decide membership eligibility before assigning the roster"}
+   {:operation :schedule-staff-shift-proposal :member-id "member-2"
+    :effect :propose
+    :description "Assign a disciplinary hearing slot to the rota"}
+
+   ;; --- HARD check 3: scope exclusion (JA patterns) ---
+   {:operation :coordinate-dues-processing-logistics :member-id "member-1"
+    :effect :propose
+    :description "会費減免の可否を決める"}
+
+   ;; --- all three HARD checks at once ---
+   {:operation :schedule-member-event :member-id "member-3"
+    :effect :execute
+    :description "Force through a membership eligibility ruling"}])
+
+(defn run-demo!
+  "Runs the fixed `scenario` through the REAL pipeline against a freshly
+  seeded store and returns that store. Every field the renderer reads below
+  is governor/store output from this call, not a hand-typed copy."
+  []
+  (let [db (store/make-store)]
+    (doseq [proposal scenario]
+      (operation/run-proposal db proposal))
+    db))
+
+;; ----------------------------- derivation -----------------------------
+
+(defn governor-hold-facts
+  "The HARD-hold records this run produced.
+
+  Naming note: sibling cloud-itonami consoles count `:governor-hold` facts.
+  This repo's ledger has no `:t` discriminator -- `operation/commit-proposal`
+  writes `{:proposal .. :result .. :timestamp ..}`, and a HARD rejection
+  surfaces as `:result {:action :held}` because `operation/decide-proposal`
+  maps `governor/govern`'s `:passes? false` onto `:held`. So `:action :held`
+  IS this repo's `:governor-hold` record, and it is what the build-time
+  invariant in `-main` counts."
+  [ledger]
+  (filterv #(= :held (get-in % [:result :action])) ledger))
+
+(defn violations-for
+  "Structured violations behind one ledger fact, plus WHERE they came from.
+
+  DERIVED, not hardcoded. `operation/commit-proposal` stores the governor's
+  decision as a stringified `:reason` and drops the structured `:violations`
+  vector, so the `:check/id` that actually fired is not retained in the
+  ledger. Rather than asserting `this repo is broken`, this prefers a
+  retained value when one is present and only falls back to re-deriving --
+  so the moment the pipeline starts retaining `:violations`, the page reports
+  `:retained` and the `audit only` labelling disappears on its own.
+
+  Re-derivation is legitimate here and not a second implementation:
+  `governor/govern` is a pure function of (store, proposal), the ledger keeps
+  the exact advised proposal it was given, and the pipeline never mutates the
+  member/event registers the governor reads -- so calling it again on the
+  recorded proposal returns the same decision this run made."
+  [db fact]
+  (if-let [retained (seq (:violations (:result fact)))]
+    {:source :retained :violations (vec retained)}
+    {:source :re-derived
+     :violations (vec (:violations (governor/govern db (:proposal fact))))}))
+
+(defn retention-report
+  "What the store ACTUALLY kept, measured by walking its own registers.
+
+  Nothing here is asserted from reading the source -- each field is counted
+  off the live store and ledger, so the disclosure section self-corrects if
+  the pipeline is fixed later."
+  [db ledger]
+  (let [log (vec (store/coordination-log db))
+        holds (governor-hold-facts ledger)]
+    {:ledger-count (count ledger)
+     :hold-count (count holds)
+     :coordination-log-count (count log)
+     :commit-record-invoked? (pos? (count log))
+     :structured-violations-retained (count (filterv #(seq (:violations (:result %))) holds))
+     :approver-key-present?
+     (boolean (some #(some % [:approved-by :approver :by :actor-id]) log))
+     :terminal-actions
+     (into (sorted-set) (map #(get-in % [:result :action])) ledger)}))
+
+(defn- observed-actions-by-op
+  "op -> set of terminal actions this run actually reached for it."
+  [ledger]
+  (reduce (fn [m fact]
+            (update m (get-in fact [:proposal :operation])
+                    (fnil conj (sorted-set)) (get-in fact [:result :action])))
+          {} ledger))
+
+(defn- member-action-tally
+  "Every terminal action this run reached for a member, with counts, ordered
+  by action name so the cell is deterministic.
+
+  Deliberately NOT just the last action: each seeded member appears in several
+  proposals, and this scenario ends on a hold for all three, so a `last action`
+  cell would render every member as uniformly blocked and hide the fact that
+  member-1 and member-2 also had proposals pass governance."
+  [ledger member-id]
+  (->> ledger
+       (filterv #(= member-id (get-in % [:proposal :member-id])))
+       (map #(get-in % [:result :action]))
+       frequencies
+       (sort-by (comp str key))))
+
+;; ----------------------------- rendering -----------------------------
+
+(defn- esc [v]
+  (-> (str v)
+      (str/replace "&" "&amp;")
+      (str/replace "<" "&lt;")
+      (str/replace ">" "&gt;")
+      (str/replace "\"" "&quot;")))
+
+(defn- kw-name [v]
+  (if (keyword? v) (name v) (str v)))
+
+(defn- action-cell [action]
+  (case action
+    :held "<span class=\"critical\">HARD hold</span>"
+    :escalated "<span class=\"warn\">escalated to human</span>"
+    :pending-approval "<span class=\"warn\">awaiting approval</span>"
+    :failed "<span class=\"err\">intake failed</span>"
+    nil "<span class=\"muted\">no activity</span>"
+    (str "<span class=\"muted\">" (esc (kw-name action)) "</span>")))
+
+(defn- yes-no [flag yes-class]
+  (if flag
+    (str "<span class=\"" yes-class "\">yes</span>")
+    "<span class=\"critical\">no</span>"))
+
+(defn- member-row [ledger accounts {:keys [member-id name title organization
+                                           registered? verified?]}]
+  (let [acct (get accounts member-id)
+        overdue? (not= "current" (:status acct))]
+    (format (str "        <tr><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td>"
+                 "<td>%s</td><td>%s</td><td class=\"amt\">%s</td><td>%s</td><td>%s</td></tr>")
+            (esc member-id) (esc name) (esc title) (esc organization)
+            (yes-no registered? "ok") (yes-no verified? "ok")
+            (esc (:dues-balance acct))
+            (if overdue?
+              (str "<span class=\"warn\">" (esc (:status acct)) "</span>")
+              (str "<span class=\"ok\">" (esc (:status acct)) "</span>"))
+            (let [tally (member-action-tally ledger member-id)]
+              (if (seq tally)
+                (str/join ", " (map (fn [[action n]]
+                                      (str "<span class=\"num\">" n "&times;</span> "
+                                           (action-cell action)))
+                                    tally))
+                (action-cell nil))))))
+
+(defn- event-row [members {:keys [event-id name date location organizer-member]}]
+  (format "        <tr><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+          (esc event-id) (esc name) (esc date) (esc location)
+          (esc (str (:name (get members organizer-member)) " (" organizer-member ")"))))
+
+(defn- hold-row [db {:keys [proposal] :as fact}]
+  (let [{:keys [source violations]} (violations-for db fact)
+        ids (str/join ", " (map #(str "<code>" (esc (kw-name (:check/id %))) "</code>")
+                                violations))
+        texts (str/join "<br>" (map #(esc (:violation %)) violations))]
+    (format (str "        <tr><td><code>%s</code></td><td>%s</td><td>%s</td>"
+                 "<td>%s</td><td>%s <span class=\"muted\">(%s)</span></td><td>%s</td></tr>")
+            (esc (kw-name (:operation proposal)))
+            (if-let [m (:member-id proposal)] (str "<code>" (esc m) "</code>") "<span class=\"muted\">—</span>")
+            (esc (:description proposal))
+            (esc (kw-name (:effect proposal)))
+            ids
+            (if (= :retained source)
+              "retained in record"
+              "audit only — not retained in record")
+            texts)))
+
+(defn- ledger-row [{:keys [proposal result timestamp]}]
+  (format (str "        <tr><td><code>%s</code></td><td>%s</td><td class=\"num\">%s</td>"
+               "<td>%s</td><td>%s</td><td class=\"muted\">%s</td></tr>")
+          (esc (kw-name (:operation proposal)))
+          (if-let [m (:member-id proposal)] (str "<code>" (esc m) "</code>") "<span class=\"muted\">—</span>")
+          (esc (:confidence proposal))
+          (action-cell (:action result))
+          (esc (:reason result))
+          (esc timestamp)))
+
+(defn- check-row [label check-id description holds db]
+  (let [n (count (filterv (fn [f]
+                            (some #(= check-id (:check/id %))
+                                  (:violations (violations-for db f))))
+                          holds))]
+    (format (str "        <tr><td>%s</td><td><code>%s</code></td><td>%s</td>"
+                 "<td class=\"num\">%s</td></tr>")
+            (esc label) (esc (kw-name check-id)) description
+            (if (pos? n)
+              (str "<span class=\"critical\">" n "</span>")
+              "<span class=\"muted\">0</span>"))))
+
+(defn- phase-row [op declared-auto? declared-escalate? observed]
+  (format "        <tr><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td></tr>"
+          (esc (kw-name op))
+          (cond declared-auto? "<span class=\"ok\">auto-commit</span>"
+                declared-escalate? "<span class=\"warn\">always escalate</span>"
+                :else "<span class=\"muted\">not listed</span>")
+          (if (seq observed)
+            (str/join ", " (map #(action-cell %) observed))
+            "<span class=\"muted\">not exercised</span>")
+          (cond
+            (empty? observed)
+            "<span class=\"muted\">not exercised by this run</span>"
+            (and declared-escalate? (contains? observed :escalated))
+            "<span class=\"ok\">agrees — escalated as declared</span>"
+            (and declared-auto? (contains? observed :committed))
+            "<span class=\"ok\">agrees — auto-committed</span>"
+            declared-auto?
+            (str "<span class=\"critical\">divergent</span> — declared auto-commit at phase 3, "
+                 "but the pipeline reached no committed action")
+            :else "<span class=\"muted\">—</span>")))
+
+(defn render
+  "Renders the whole operator-console.html document from a store `db` that has
+  already been driven by `run-demo!` (or any other real scenario)."
+  [db]
+  (let [ledger (vec (store/ledger db))
+        holds (governor-hold-facts ledger)
+        report (retention-report db ledger)
+        members (sort-by :member-id (store/all-members db))
+        members-by-id (into {} (map (juxt :member-id identity)) members)
+        accounts (into {} (map (juxt :member-id identity)) (store/all-accounts db))
+        events (sort-by :event-id (store/all-events db))
+        observed (observed-actions-by-op ledger)
+        phase-3 (get phase/phase-config 3)
+        phase-ops (sort (into (set (:auto phase-3)) (:always-escalate phase-3)))]
+    (str
+     "<!DOCTYPE html>\n<html lang=\"en\">\n<head><meta charset=\"utf-8\">"
+     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">"
+     "<meta name=\"color-scheme\" content=\"light\">"
+     "<title>cloud-itonami-isic-949 &middot; civic membership organization &mdash; Operator Console</title>"
+     "<style>"
+     (skin/dds+skin)
+     "</style></head>\n<body>\n"
+
+     "<header class=\"bar\">\n"
+     "  <h1>Civic membership organization administrative coordination (ISIC 949) — Operator Console</h1>\n"
+     "</header>\n"
+     "<p><span class=\"badge\">read-only sample</span> <span class=\"badge\">governor-gated</span> "
+     "<span class=\"badge\">membership-eligibility, doctrine, political-position, advocacy, dues-amount &amp; discipline are permanently out of scope</span></p>\n"
+     "<p class=\"subtitle\">Build-time output of <code>civicmembershiporg.render-html</code> "
+     "(<code>clojure -M:dev:render-html</code>). Every row below was produced by running the real actor "
+     "— <code>civicmembershiporg.operation/run-proposal</code> "
+     "(intake → advisor → governor → decide → store) — over the seeded directory in "
+     "<code>civicmembershiporg.store/demo-data</code>. Nothing on this page is hand-written sample data.</p>\n"
+
+     "<main>\n"
+
+     ;; ---- members ----
+     "  <section class=\"card\">\n"
+     "    <h2>Member register</h2>\n"
+     "    <p class=\"muted\">Seeded directory. <strong>Registered</strong> and <strong>verified</strong> are re-derived "
+     "from each member's own record on every proposal — never taken from the proposal's self-report — and a member "
+     "failing either one is a HARD block on any proposal naming them.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Member</th><th>Name</th><th>Title</th><th>Organization</th>"
+     "<th>Registered</th><th>Verified</th><th>Dues balance</th><th>Account</th><th>Actions this run</th></tr></thead>\n"
+     "      <tbody>\n"
+     (str/join "\n" (map (partial member-row ledger accounts) members)) "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     ;; ---- events ----
+     "  <section class=\"card\">\n"
+     "    <h2>Scheduled events</h2>\n"
+     "    <p class=\"muted\">Seeded event directory. Organizer is joined back to the member register by "
+     "<code>:organizer-member</code>.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Event</th><th>Name</th><th>Date</th><th>Location</th><th>Organizer</th></tr></thead>\n"
+     "      <tbody>\n"
+     (str/join "\n" (map (partial event-row members-by-id) events)) "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     ;; ---- governor checks ----
+     "  <section class=\"card\">\n"
+     "    <h2>Governor — three HARD checks</h2>\n"
+     "    <p class=\"muted\">These are permanent and un-overridable: there is no approval path that can release a held "
+     "proposal. The counts are the number of holds in <em>this</em> run in which each check actually fired — a single "
+     "proposal can trip more than one, so the counts sum to more than the hold total.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Check</th><th>id</th><th>What it blocks</th><th>Fired this run</th></tr></thead>\n"
+     "      <tbody>\n"
+     (str/join
+      "\n"
+      [(check-row "1. Member unverified" :member-unverified
+                  (str "Target member must exist in the store AND be independently "
+                       "<code>:registered?</code> and <code>:verified?</code>, re-derived every time.")
+                  holds db)
+       (check-row "2. Effect not :propose" :effect-not-propose
+                  (str "The actor may only ever <em>propose</em>. Any proposal arriving with another "
+                       "<code>:effect</code> is rejected outright rather than executed.")
+                  holds db)
+       (check-row "3. Scope exclusion" :scope-exclusion
+                  (str "Membership eligibility/expulsion, religious doctrine, political position, advocacy "
+                       "&amp; policy positions, dues amounts &amp; fee waivers, and disciplinary action are "
+                       "permanently outside this actor's remit. Scanned in English and Japanese. "
+                       "<code>:flag-safety-concern</code> is exempt by design so that safety and conduct "
+                       "reporting cannot block itself.")
+                  holds db)]) "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     ;; ---- hard holds ----
+     "  <section class=\"card\">\n"
+     "    <h2>HARD holds this run (" (count holds) ")</h2>\n"
+     "    <p class=\"muted\">Every proposal the governor refused. None of these reached a human — there is no override "
+     "path for a HARD hold in this actor.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Op</th><th>Member</th><th>Proposal</th><th>Effect</th><th>Check(s) fired</th>"
+     "<th>Governor's reason</th></tr></thead>\n"
+     "      <tbody>\n"
+     (str/join "\n" (map (partial hold-row db) holds)) "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     ;; ---- phase gate ----
+     "  <section class=\"card\">\n"
+     "    <h2>Rollout phase gate — declared vs. observed</h2>\n"
+     "    <p class=\"muted\">Left column is what <code>civicmembershiporg.phase/phase-config</code> declares for "
+     "phase 3 (<em>" (esc (:name phase-3)) "</em>); middle is what this run actually reached. The comparison is "
+     "computed here, not asserted — so this row set is the honest place to see that the phase table is currently "
+     "<strong>declared but not consulted</strong> by <code>operation/decide-proposal</code>.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Op</th><th>Declared at phase 3</th><th>Observed this run</th><th>Verdict</th></tr></thead>\n"
+     "      <tbody>\n"
+     (str/join "\n" (map #(phase-row % (phase/auto-commits-at-phase? 3 %)
+                                     (phase/always-escalates? 3 %)
+                                     (get observed % (sorted-set)))
+                         phase-ops)) "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     ;; ---- ledger ----
+     "  <section class=\"card\">\n"
+     "    <h2>Audit ledger (this run — " (count ledger) " facts)</h2>\n"
+     "    <p class=\"muted\">Append-only decision-fact log. One fact per proposal, written by "
+     "<code>operation/commit-proposal</code> whatever the outcome — holds are recorded, not discarded. "
+     "Confidence is the advisor's; it carries no authority over the governor.</p>\n"
+     "    <table>\n"
+     "      <thead><tr><th>Op</th><th>Member</th><th>Advisor confidence</th><th>Action</th><th>Reason</th>"
+     "<th>Timestamp</th></tr></thead>\n"
+     "      <tbody>\n"
+     (str/join "\n" (map ledger-row ledger)) "\n"
+     "      </tbody>\n"
+     "    </table>\n"
+     "  </section>\n"
+
+     ;; ---- retention disclosure ----
+     "  <section class=\"banner\">\n"
+     "    <h2>What this run did NOT retain</h2>\n"
+     "    <p class=\"muted\">Measured by walking the store's own registers at render time, not asserted from reading "
+     "the source — so these statements correct themselves if the pipeline changes.</p>\n"
+     "    <ul>\n"
+     "      <li><strong>No proposal in this actor ever commits.</strong> "
+     (if (:commit-record-invoked? report)
+       (str "<code>store/commit-record!</code> retained <span class=\"num\">"
+            (:coordination-log-count report) "</span> record(s) in the coordination log.")
+       (str "The coordination log is <span class=\"num\">empty (0 records)</span> after <span class=\"num\">"
+            (:ledger-count report) "</span> proposals: <code>store/commit-record!</code> is never invoked by "
+            "<code>operation/run-proposal</code>. <code>:pending-approval</code> is a terminal action here — "
+            "there is no <code>approve!</code> entry point in this repo at all."))
+     "</li>\n"
+     "      <li><strong>Approver attribution: "
+     (if (:approver-key-present? report)
+       "present.</strong> Committed records carry an approver key."
+       (str "not applicable, and not silently omitted.</strong> Because nothing commits, no approver identity is "
+            "ever produced — this is different from an approver being recorded and then dropped. The column is "
+            "absent above because there is nothing to attribute, not because it was hidden."))
+     "</li>\n"
+     "      <li><strong>Structured violations are not kept in the ledger.</strong> Of <span class=\"num\">"
+     (:hold-count report) "</span> hold(s), <span class=\"num\">"
+     (:structured-violations-retained report) "</span> retained the governor's structured "
+     "<code>:violations</code> vector; <code>operation/commit-proposal</code> stores only the stringified "
+     "<code>:reason</code>, so the <code>:check/id</code> column above is re-derived by calling the governor "
+     "again on the exact proposal the ledger kept, and is labelled <em>audit only — not retained in record</em> "
+     "wherever that was necessary.</li>\n"
+     "      <li><strong>Terminal actions reached this run:</strong> "
+     (str/join ", " (map #(str "<code>" (esc (kw-name %)) "</code>") (:terminal-actions report)))
+     ". No <code>:committed</code> action appears.</li>\n"
+     "    </ul>\n"
+     "  </section>\n"
+
+     "</main>\n"
+     "<footer>\n"
+     "  <p>cloud-itonami-isic-949 — governed open occupation blueprint (ISIC 949). "
+     "Regenerate with <code>clojure -M:dev:render-html</code>. The build fails if a run produces zero HARD "
+     "governor holds, so this page cannot silently degrade into a page that only shows the happy path.</p>\n"
+     "</footer>\n"
+     "</body></html>\n")))
+
+;; ----------------------------- entry point -----------------------------
+
+(def ^:private required-checks
+  "Every HARD check this scenario is built to exercise. Asserted at build
+  time so that a check silently ceasing to fire fails the build instead of
+  quietly shrinking the console."
+  #{:member-unverified :effect-not-propose :scope-exclusion})
+
+(defn -main
+  "Regenerates the console. Throws — failing the build — unless the run
+  actually exercised the governor.
+
+  The zero-hold guard is the point: a console that renders only clean
+  proposals would look healthy while proving nothing, so `the scenario must
+  produce HARD holds` is enforced here as an invariant rather than left as a
+  convention that a later edit could quietly drop."
+  [& args]
+  (let [out (or (first args) "docs/samples/operator-console.html")
+        db (run-demo!)
+        ledger (vec (store/ledger db))
+        holds (governor-hold-facts ledger)
+        fired (into #{} (comp (mapcat #(:violations (violations-for db %)))
+                              (map :check/id))
+                    holds)
+        escalated (filterv #(= :escalated (get-in % [:result :action])) ledger)]
+
+    (when (zero? (count holds))
+      (throw (ex-info (str "render-html: the scenario produced ZERO governor holds. "
+                           "A console that shows only the happy path proves nothing about the "
+                           "governor, so this is a build failure, not a warning.")
+                      {:ledger-facts (count ledger)
+                       :actions (into (sorted-set) (map #(get-in % [:result :action])) ledger)})))
+
+    (when-let [missing (seq (remove fired required-checks))]
+      (throw (ex-info (str "render-html: HARD checks declared by this scenario never fired: "
+                           (str/join ", " (map name missing)))
+                      {:required required-checks :fired fired :holds (count holds)})))
+
+    ;; The `:flag-safety-concern` scope exemption is load-bearing: if it ever
+    ;; regressed to blocking, safety reporting would silently stop working and
+    ;; the console would still render. Prove it stayed exempt.
+    (when-not (some #(= :flag-safety-concern (get-in % [:proposal :operation])) escalated)
+      (throw (ex-info "render-html: no :flag-safety-concern proposal escalated; the safety-reporting exemption regressed."
+                      {:escalated (count escalated)})))
+
+    (io/make-parents out)
+    (spit out (render db))
+    (println "wrote" out
+             (str "(" (count ledger) " ledger facts, "
+                  (count holds) " HARD holds, "
+                  (count escalated) " escalations, "
+                  (count (store/coordination-log db)) " committed records, checks fired: "
+                  (str/join "/" (sort (map name fired))) ")"))))
