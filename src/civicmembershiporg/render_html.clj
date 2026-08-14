@@ -207,11 +207,20 @@
                     (fnil conj (sorted-set)) (get-in fact [:result :action])))
           {} ledger))
 
-(defn- last-action-for-member
-  "The last terminal action this run reached for a given member id, or nil."
+(defn- member-action-tally
+  "Every terminal action this run reached for a member, with counts, ordered
+  by action name so the cell is deterministic.
+
+  Deliberately NOT just the last action: each seeded member appears in several
+  proposals, and this scenario ends on a hold for all three, so a `last action`
+  cell would render every member as uniformly blocked and hide the fact that
+  member-1 and member-2 also had proposals pass governance."
   [ledger member-id]
-  (some-> (last (filterv #(= member-id (get-in % [:proposal :member-id])) ledger))
-          :result :action))
+  (->> ledger
+       (filterv #(= member-id (get-in % [:proposal :member-id])))
+       (map #(get-in % [:result :action]))
+       frequencies
+       (sort-by (comp str key))))
 
 ;; ----------------------------- rendering -----------------------------
 
@@ -239,8 +248,8 @@
     (str "<span class=\"" yes-class "\">yes</span>")
     "<span class=\"critical\">no</span>"))
 
-(defn- member-row [db ledger accounts {:keys [member-id name title organization
-                                              registered? verified?]}]
+(defn- member-row [ledger accounts {:keys [member-id name title organization
+                                           registered? verified?]}]
   (let [acct (get accounts member-id)
         overdue? (not= "current" (:status acct))]
     (format (str "        <tr><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td>"
@@ -251,7 +260,13 @@
             (if overdue?
               (str "<span class=\"warn\">" (esc (:status acct)) "</span>")
               (str "<span class=\"ok\">" (esc (:status acct)) "</span>"))
-            (action-cell (last-action-for-member ledger member-id)))))
+            (let [tally (member-action-tally ledger member-id)]
+              (if (seq tally)
+                (str/join ", " (map (fn [[action n]]
+                                      (str "<span class=\"num\">" n "&times;</span> "
+                                           (action-cell action)))
+                                    tally))
+                (action-cell nil))))))
 
 (defn- event-row [members {:keys [event-id name date location organizer-member]}]
   (format "        <tr><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
@@ -362,9 +377,9 @@
      "failing either one is a HARD block on any proposal naming them.</p>\n"
      "    <table>\n"
      "      <thead><tr><th>Member</th><th>Name</th><th>Title</th><th>Organization</th>"
-     "<th>Registered</th><th>Verified</th><th>Dues balance</th><th>Account</th><th>Last action this run</th></tr></thead>\n"
+     "<th>Registered</th><th>Verified</th><th>Dues balance</th><th>Account</th><th>Actions this run</th></tr></thead>\n"
      "      <tbody>\n"
-     (str/join "\n" (map (partial member-row db ledger accounts) members)) "\n"
+     (str/join "\n" (map (partial member-row ledger accounts) members)) "\n"
      "      </tbody>\n"
      "    </table>\n"
      "  </section>\n"
