@@ -40,7 +40,7 @@
   (default `docs/samples/operator-console.html`)."
   (:require [jp-go-dds.skin :as skin]
             [clojure.java.io :as io]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [civicmembershiporg.store :as store]
             [civicmembershiporg.governor :as governor]
             [civicmembershiporg.operation :as operation]
