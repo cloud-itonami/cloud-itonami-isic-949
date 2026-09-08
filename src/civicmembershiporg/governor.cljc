@@ -9,7 +9,7 @@
      religious-doctrine, political-position, advocacy-policy/policy-content,
      dues-amount/fee-waiver, or disciplinary action is permanently blocked."
   (:require [civicmembershiporg.store :as store]
-            [clojure.string :as str]))
+            [kotoba.lang.text :as str]))
 
 ;; ---------------------- hard checks ----------------------
 
