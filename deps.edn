@@ -33,7 +33,7 @@
   :render-html {:main-opts ["-m" "civicmembershiporg.render-html"]}
   ;; :extra-paths alone made this alias uninvocable -- nothing ran the suite,
   ;; which is why 11 misplaced docstrings survived here. `clojure -M:test` now
-  ;; runs it; `nbb --classpath src:test run-tests.cljs` runs the same suite
+  ;; runs it; `nbb --classpath src:test run-tests.kotoba` runs the same suite
   ;; under the preferred runtime.
   :test {:extra-paths ["test"]
          :main-opts ["-m" "civicmembershiporg.test"]}
