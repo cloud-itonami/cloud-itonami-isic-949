@@ -18,7 +18,7 @@
          :git/sha "83db99546eabc53613ae826ea41d1533a3c574af"}}
  :aliases
  {;; Sibling cloud-itonami repos invoke build-time generators as
-  ;; `clojure -M:dev:render-html`, where :dev pins their `:local/root`
+  ;; `kbb -M:dev:render-html`, where :dev pins their `:local/root`
   ;; monorepo deps (e.g. isic-9522 overrides langchain). THIS repo has no
   ;; :local/root deps to override -- its actor pipeline is self-contained
   ;; `civicmembershiporg.operation`, not a langgraph StateGraph -- so :dev is
@@ -26,14 +26,14 @@
   ;; here too. Do not point it at a local jp-go-dds checkout: that would let
   ;; the committed console's CSS drift from the :git/sha pinned above.
   :dev {}
-  ;; clojure -M:dev:render-html [out-file]
+  ;; kbb -M:dev:render-html [out-file]
   ;;   -> regenerate docs/samples/operator-console.html by driving the REAL
   ;;      actor (flagship checklist item 2). Throws if the run produced zero
   ;;      HARD governor holds -- see `civicmembershiporg.render-html`.
   :render-html {:main-opts ["-m" "civicmembershiporg.render-html"]}
   ;; :extra-paths alone made this alias uninvocable -- nothing ran the suite,
-  ;; which is why 11 misplaced docstrings survived here. `clojure -M:test` now
-  ;; runs it; `nbb --classpath src:test run-tests.kotoba` runs the same suite
+  ;; which is why 11 misplaced docstrings survived here. `kbb -M:test` now
+  ;; runs it; `kbb --backend sci --classpath src:test run-tests.kotoba` runs the same suite
   ;; under the preferred runtime.
   :test {:extra-paths ["test"]
          :main-opts ["-m" "civicmembershiporg.test"]}

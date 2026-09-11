@@ -2468,7 +2468,7 @@ img,svg { max-width: 100%; height: auto; }</style></head>
   <h1>Civic membership organization administrative coordination (ISIC 949) — Operator Console</h1>
 </header>
 <p><span class="badge">read-only sample</span> <span class="badge">governor-gated</span> <span class="badge">membership-eligibility, doctrine, political-position, advocacy, dues-amount &amp; discipline are permanently out of scope</span></p>
-<p class="subtitle">Build-time output of <code>civicmembershiporg.render-html</code> (<code>clojure -M:dev:render-html</code>). Every row below was produced by running the real actor — <code>civicmembershiporg.operation/run-proposal</code> (intake → advisor → governor → decide → store) — over the seeded directory in <code>civicmembershiporg.store/demo-data</code>. Nothing on this page is hand-written sample data.</p>
+<p class="subtitle">Build-time output of <code>civicmembershiporg.render-html</code> (<code>kbb -M:dev:render-html</code>). Every row below was produced by running the real actor — <code>civicmembershiporg.operation/run-proposal</code> (intake → advisor → governor → decide → store) — over the seeded directory in <code>civicmembershiporg.store/demo-data</code>. Nothing on this page is hand-written sample data.</p>
 <main>
   <section class="card">
     <h2>Member register</h2>
@@ -2576,6 +2576,6 @@ img,svg { max-width: 100%; height: auto; }</style></head>
   </section>
 </main>
 <footer>
-  <p>cloud-itonami-isic-949 — governed open occupation blueprint (ISIC 949). Regenerate with <code>clojure -M:dev:render-html</code>. The build fails if a run produces zero HARD governor holds, so this page cannot silently degrade into a page that only shows the happy path.</p>
+  <p>cloud-itonami-isic-949 — governed open occupation blueprint (ISIC 949). Regenerate with <code>kbb -M:dev:render-html</code>. The build fails if a run produces zero HARD governor holds, so this page cannot silently degrade into a page that only shows the happy path.</p>
 </footer>
 </body></html>
