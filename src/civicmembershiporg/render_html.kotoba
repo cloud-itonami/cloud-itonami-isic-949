@@ -36,7 +36,7 @@
   only timestamp in the ledger is the fixed literal `operation/commit-proposal`
   writes). Two consecutive runs are byte-identical.
 
-  Usage: `clojure -M:dev:render-html [out-file]`
+  Usage: `kbb -M:dev:render-html [out-file]`
   (default `docs/samples/operator-console.html`)."
   (:require [jp-go-dds.skin :as skin]
             [clojure.java.io :as io]
@@ -362,7 +362,7 @@
      "<p><span class=\"badge\">read-only sample</span> <span class=\"badge\">governor-gated</span> "
      "<span class=\"badge\">membership-eligibility, doctrine, political-position, advocacy, dues-amount &amp; discipline are permanently out of scope</span></p>\n"
      "<p class=\"subtitle\">Build-time output of <code>civicmembershiporg.render-html</code> "
-     "(<code>clojure -M:dev:render-html</code>). Every row below was produced by running the real actor "
+     "(<code>kbb -M:dev:render-html</code>). Every row below was produced by running the real actor "
      "— <code>civicmembershiporg.operation/run-proposal</code> "
      "(intake → advisor → governor → decide → store) — over the seeded directory in "
      "<code>civicmembershiporg.store/demo-data</code>. Nothing on this page is hand-written sample data.</p>\n"
@@ -512,7 +512,7 @@
      "</main>\n"
      "<footer>\n"
      "  <p>cloud-itonami-isic-949 — governed open occupation blueprint (ISIC 949). "
-     "Regenerate with <code>clojure -M:dev:render-html</code>. The build fails if a run produces zero HARD "
+     "Regenerate with <code>kbb -M:dev:render-html</code>. The build fails if a run produces zero HARD "
      "governor holds, so this page cannot silently degrade into a page that only shows the happy path.</p>\n"
      "</footer>\n"
      "</body></html>\n")))

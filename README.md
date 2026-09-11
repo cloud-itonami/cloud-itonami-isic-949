@@ -66,7 +66,7 @@ All proposals are subject to three **permanent, un-overridable** checks:
 Run all tests:
 
 ```bash
-nbb -m civicmembershiporg.test
+kbb --backend sci -m civicmembershiporg.test
 ```
 
 **Test coverage (20 cases)**:
@@ -81,7 +81,7 @@ nbb -m civicmembershiporg.test
 Run simulation with 5 scenarios:
 
 ```bash
-nbb -m civicmembershiporg.sim
+kbb --backend sci -m civicmembershiporg.sim
 ```
 
 Scenarios:
