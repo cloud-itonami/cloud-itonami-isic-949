@@ -7,7 +7,7 @@
        org.clojure/clojure {:mvn/version "1.12.0"}
         org.clojure/clojurescript {:mvn/version "1.10.914"}
         ;; デジタル庁デザインシステム(DADS) -- the workspace BASE design system
-        ;; (com-junkawasaki/root CLAUDE.md, ADR-2607141915). Pinned by :git/sha
+        ;; (com-junkawasaki/root AGENTS.md, ADR-2607141915). Pinned by :git/sha
         ;; rather than :local/root so this repo stays forkable outside the
         ;; monorepo checkout. Supplies `jp-go-dds.skin/dds+skin`, the vendored
         ;; upstream CSS + skin that `docs/samples/operator-console.html` and the
